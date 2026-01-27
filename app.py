@@ -21,23 +21,19 @@ if role == "Teacher":
     st.subheader("👩‍🏫 Teacher Panel")
 
     grade = st.selectbox("Class", sorted(df["grade"].unique()))
-    subject = st.selectbox(
-        "Subject",
-        sorted(df[df["grade"] == grade]["subject"].unique())
-    )
-
+    subject = st.selectbox("Subject", sorted(df[df["grade"] == grade]["subject"].unique()))
     annual_plan = calculate_annual_plan(df, grade, subject)
-    chapter = st.selectbox("Chapter", list(annual_plan.keys()))
 
+    chapter = st.selectbox("Chapter", list(annual_plan.keys()))
     meta = {"grade": grade, "subject": subject, "chapter": chapter}
 
     if is_locked(meta):
-        st.error("🔒 This lesson plan is APPROVED and LOCKED.")
+        st.error("🔒 Lesson plan is approved and locked.")
         st.stop()
 
-    days = st.number_input("Number of Days", 1, value=annual_plan[chapter])
+    days = st.number_input("Number of Days", min_value=1, value=annual_plan[chapter])
     period_minutes = st.selectbox("Period Duration", [30, 35, 40, 45])
-    use_ai = st.checkbox("Enrich lesson with stories / rhymes")
+    use_ai = st.checkbox("Enrich with AI (stories / rhymes)")
 
     if st.button("Generate Lesson Plan"):
         plans = generate_daywise_plan(df, grade, subject, chapter, days, period_minutes)
@@ -77,7 +73,7 @@ if role == "Principal":
         with st.expander(
             f"{r['meta']['grade']} | {r['meta']['subject']} | {r['meta']['chapter']}"
         ):
-            remark = st.text_area("Remark", key=r["id"])
+            remark = st.text_area("Principal Remark", key=r["id"])
             if st.button("Approve & Lock", key=f"a_{r['id']}"):
                 approve_lesson(r["id"], remark)
                 st.rerun()
