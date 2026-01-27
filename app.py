@@ -1,110 +1,101 @@
 import streamlit as st
-import os, json
 from lesson_engine import (
     load_data,
-    generate_annual_plan,
-    generate_daily_plans,
-    enrich_with_ai
+    generate_chapter_plan
 )
-from approvals import submit_for_approval, approve_lesson, is_locked
 
 st.set_page_config(page_title="ERPACAD", layout="wide")
-st.title("ERPACAD – Academic Orchestration Engine")
 
+# ================= SESSION STATE =================
+if "chapter_plan" not in st.session_state:
+    st.session_state.chapter_plan = None
+
+# ================= HEADER =================
+st.title("ERPACAD – Academic Execution Engine")
+
+# ================= LOAD DATA =================
 df = load_data()
-APPROVAL_DIR = "approvals"
 
-role = st.sidebar.selectbox("Login as", ["Teacher", "Principal"])
+# ================= TEACHER INPUT =================
+st.sidebar.header("Lesson Setup")
 
-# ================= TEACHER =================
-if role == "Teacher":
-    st.subheader("👩‍🏫 Teacher Panel")
-
-    grade = st.selectbox("Class", sorted(df["grade"].unique()))
-    subject = st.selectbox(
-        "Subject", sorted(df[df["grade"] == grade]["subject"].unique())
+grade = st.sidebar.selectbox("Class", sorted(df["grade"].unique()))
+subject = st.sidebar.selectbox(
+    "Subject",
+    sorted(df[df["grade"] == grade]["subject"].unique())
+)
+chapter = st.sidebar.selectbox(
+    "Chapter",
+    sorted(
+        df[
+            (df["grade"] == grade) &
+            (df["subject"] == subject)
+        ]["chapter"].unique()
     )
+)
 
-    total_days = st.slider(
-        "Total Working Days in Academic Year",
-        min_value=160,
-        max_value=210,
-        value=210
-    )
+total_days = st.sidebar.number_input(
+    "Total Days for Chapter",
+    min_value=1,
+    max_value=10,
+    value=3
+)
 
-    pedagogy = st.selectbox(
-        "Pedagogy Framework",
-        ["LEARN360", "BLOOMS", "5E"]
-    )
+pedagogy = st.sidebar.selectbox(
+    "Pedagogy",
+    ["LEARN360", "BLOOMS", "5E"]
+)
 
-    annual_plan = generate_annual_plan(df, grade, subject, total_days)
-
-    st.markdown("## 📅 Annual Academic Plan")
-    st.table(
-        [{"Chapter": k, "Days": v} for k, v in annual_plan.items()]
-    )
-
-    chapter = st.selectbox("Select Chapter", list(annual_plan.keys()))
-    days = annual_plan[chapter]
-
-    meta = {
-        "grade": grade,
-        "subject": subject,
-        "chapter": chapter,
-        "pedagogy": pedagogy,
-        "days": days
-    }
-
-    if is_locked(meta):
-        st.error("🔒 Lesson plan already approved and locked.")
-        st.stop()
-
-    use_ai = st.checkbox("Generate detailed teaching script (AI)")
-
-    if st.button("Generate Daily Lesson Plans"):
-        plans = generate_daily_plans(
-            df, grade, subject, chapter, days, pedagogy
+# ================= GENERATE CHAPTER =================
+if st.sidebar.button("Generate Chapter Lesson Plan"):
+    with st.spinner("Generating complete chapter plan..."):
+        st.session_state.chapter_plan = generate_chapter_plan(
+            df, grade, subject, chapter, total_days, pedagogy
         )
 
-        if use_ai:
-            plans = [enrich_with_ai(p, grade, subject, chapter) for p in plans]
+# ================= DISPLAY CURRENT DAY =================
+if st.session_state.chapter_plan:
+    plan = st.session_state.chapter_plan
 
-        st.session_state["plans"] = plans
-        st.session_state["meta"] = meta
+    # Find first unlocked & not completed day
+    current_day = None
+    for d in plan["days"]:
+        if d["status"] == "unlocked":
+            current_day = d
+            break
 
-    if "plans" in st.session_state:
-        for p in st.session_state["plans"]:
-            st.markdown(f"## {p['day']} ({p['pedagogy']})")
-            st.write("Learning Outcomes:", p["learning_outcomes"])
-            st.write("Pedagogical Flow:", p["structure"])
-            st.write("Assessment:", p["assessment"])
-            if use_ai:
-                st.markdown("### Detailed Teaching Script")
-                st.write(p["ai_script"])
+    if current_day:
+        st.subheader(
+            f"{plan['chapter']} – Day {current_day['day_no']} of {plan['total_days']}"
+        )
 
-        if st.button("📤 Submit to Principal"):
-            submit_for_approval(st.session_state["meta"], st.session_state["plans"])
-            st.success("Submitted for approval")
+        st.markdown("### Period Structure (CBSE)")
+        for seg, mins in current_day["period_structure"]:
+            st.write(f"- **{seg}**: {mins} minutes")
 
-# ================= PRINCIPAL =================
-if role == "Principal":
-    st.subheader("🧑‍💼 Principal Dashboard")
+        st.markdown("### Learning Outcomes")
+        for lo in current_day["learning_outcomes"]:
+            st.write(f"- {lo}")
 
-    records = []
-    if os.path.exists(APPROVAL_DIR):
-        for f in os.listdir(APPROVAL_DIR):
-            if f.endswith(".json"):
-                with open(f"{APPROVAL_DIR}/{f}", "r") as file:
-                    records.append(json.load(file))
+        if current_day["integration"]:
+            st.markdown(
+                f"### Integration Focus: **{current_day['integration']}**"
+            )
 
-    pending = [r for r in records if r["status"] == "PENDING"]
+        st.markdown("### Teaching Script (Execute as-is)")
+        st.text(current_day["teaching_script"])
 
-    for r in pending:
-        with st.expander(
-            f"{r['meta']['grade']} | {r['meta']['subject']} | "
-            f"{r['meta']['chapter']} ({r['meta']['pedagogy']})"
-        ):
-            remark = st.text_area("Principal Remark", key=r["id"])
-            if st.button("Approve & Lock", key=f"a_{r['id']}"):
-                approve_lesson(r["id"], remark)
-                st.rerun()
+        # ================= MARK COMPLETED =================
+        if st.button("Mark Day as Completed"):
+            idx = current_day["day_no"] - 1
+            plan["days"][idx]["status"] = "completed"
+
+            # Unlock next day if exists
+            if idx + 1 < len(plan["days"]):
+                plan["days"][idx + 1]["status"] = "unlocked"
+
+            st.success("Day marked as completed. Next day unlocked.")
+            st.experimental_rerun()
+
+    else:
+        st.success("🎉 Chapter completed successfully!")
