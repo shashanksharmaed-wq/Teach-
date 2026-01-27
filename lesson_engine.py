@@ -6,7 +6,7 @@ from openai import OpenAI
 DATA_PATH = "data/master.tsv"
 
 # ================= OPENAI CONFIG =================
-OPENAI_API_KEY = os.environ.get("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")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
