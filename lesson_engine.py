@@ -21,128 +21,116 @@ def load_data():
     return df
 
 
-# ================= ANNUAL PLAN ENGINE =================
-def generate_annual_plan(df, grade, subject, total_days):
-    filtered = df[(df["grade"] == grade) & (df["subject"] == subject)]
-
-    chapter_weights = (
-        filtered.groupby("chapter")["learning_outcomes"]
-        .count()
-        .to_dict()
-    )
-
-    total_weight = sum(chapter_weights.values())
-
-    allocation = {
-        ch: max(1, floor((w / total_weight) * total_days))
-        for ch, w in chapter_weights.items()
-    }
-
-    # Fix rounding drift
-    diff = total_days - sum(allocation.values())
-    chapters = list(allocation.keys())
-    i = 0
-    while diff != 0:
-        allocation[chapters[i % len(chapters)]] += 1 if diff > 0 else -1
-        diff = total_days - sum(allocation.values())
-        i += 1
-
-    return allocation
+# ================= PERIOD STRUCTURE (CBSE) =================
+PERIOD_STRUCTURE = [
+    ("Engage", 5),
+    ("Concept Build", 12),
+    ("Guided Interaction", 10),
+    ("Integration Slot", 12),
+    ("Closure & Assessment", 6)
+]
 
 
-# ================= PEDAGOGY STRUCTURES =================
-def pedagogy_learn360():
-    return [
-        "Launch – engage with students’ life and emotions",
-        "Explore – guided discovery through story or activity",
-        "Anchor – explicit concept explanation",
-        "Relate – connect to real life and self",
-        "Nurture – practice and support",
-        "Apply & Reflect – consolidation and reflection"
-    ]
+# ================= INTEGRATION ASSIGNMENT =================
+def assign_integrations(total_days):
+    """
+    Returns a list of integrations per day index (0-based).
+    Rules:
+    - Every chapter must have ART, SUBJECT_LANGUAGE, PLAY at least once
+    - Not forced daily
+    """
+    integrations = [None] * total_days
+
+    if total_days == 1:
+        integrations[0] = "SUBJECT_LANGUAGE"
+
+    elif total_days == 2:
+        integrations[1] = "PLAY"
+
+    elif total_days == 3:
+        integrations[1] = "ART"
+        integrations[2] = "PLAY"
+
+    else:
+        integrations[1] = "SUBJECT_LANGUAGE"
+        integrations[2] = "ART"
+        integrations[-1] = "PLAY"
+
+    return integrations
 
 
-def pedagogy_blooms():
-    return [
-        "Remember – recall facts",
-        "Understand – explain ideas",
-        "Apply – use knowledge",
-        "Analyze – break down ideas",
-        "Evaluate – justify opinions",
-        "Create – produce something new"
-    ]
+# ================= PEDAGOGY FLOW =================
+def pedagogy_flow(pedagogy):
+    if pedagogy == "LEARN360":
+        return [
+            "Launch",
+            "Explore",
+            "Anchor",
+            "Relate",
+            "Nurture",
+            "Apply & Reflect"
+        ]
+    if pedagogy == "BLOOMS":
+        return [
+            "Remember",
+            "Understand",
+            "Apply",
+            "Analyze",
+            "Evaluate",
+            "Create"
+        ]
+    if pedagogy == "5E":
+        return [
+            "Engage",
+            "Explore",
+            "Explain",
+            "Elaborate",
+            "Evaluate"
+        ]
+    return []
 
 
-def pedagogy_5e():
-    return [
-        "Engage – capture curiosity",
-        "Explore – investigate before explanation",
-        "Explain – clarify concepts",
-        "Elaborate – extend learning",
-        "Evaluate – check understanding"
-    ]
-
-
-PEDAGOGY_MAP = {
-    "LEARN360": pedagogy_learn360,
-    "BLOOMS": pedagogy_blooms,
-    "5E": pedagogy_5e
-}
-
-
-# ================= DAILY PLAN =================
-def generate_daily_plans(df, grade, subject, chapter, days, pedagogy):
-    outcomes = df[
-        (df["grade"] == grade) &
-        (df["subject"] == subject) &
-        (df["chapter"] == chapter)
-    ]["learning_outcomes"].tolist()
-
-    structure = PEDAGOGY_MAP[pedagogy]()
-    plans = []
-
-    for day in range(1, days + 1):
-        plans.append({
-            "day": f"Day {day}",
-            "pedagogy": pedagogy,
-            "structure": structure,
-            "learning_outcomes": outcomes
-        })
-
-    return plans
-
-
-# ================= AI TEACHING SCRIPT =================
-def enrich_with_ai(plan, grade, subject, chapter):
+# ================= AI SCRIPT GENERATION =================
+def generate_ai_script(
+    grade, subject, chapter, day_no,
+    pedagogy, learning_outcomes, integration
+):
     if not client:
-        plan["ai_script"] = (
-            "Detailed teaching guidance can be generated when AI services are available.\n"
-            "The lesson structure above is fully valid for classroom use."
+        return (
+            "Detailed teaching script can be generated when AI is available.\n"
+            "Use the structure above for classroom execution."
         )
-        return plan
 
     prompt = f"""
-You are a senior Indian school teacher.
+You are a senior Indian CBSE school teacher.
 
-Create a FULL, DETAILED, minute-wise teaching script.
+Create a VERY DETAILED, execution-level teaching script for ONE PERIOD.
 
 Class: {grade}
 Subject: {subject}
 Chapter: {chapter}
-Day: {plan['day']}
-Pedagogy: {plan['pedagogy']}
+Day: {day_no}
+Pedagogy: {pedagogy}
 
 Learning Outcomes:
-{plan['learning_outcomes']}
+{learning_outcomes}
 
-Pedagogical Flow:
-{plan['structure']}
+Period Structure (40–45 min):
+{PERIOD_STRUCTURE}
 
-Requirements:
-- Minute-wise narration
-- Exact questions teacher should ask
+Pedagogy Flow:
+{pedagogy_flow(pedagogy)}
+
+Integration for this day:
+{integration}
+
+STRICT REQUIREMENTS:
+- Minute-wise teacher narration (what teacher says)
+- Exact questions teacher asks
 - Expected student responses
-- Stories/examples where appropriate
+- Likely misconceptions & correction
+- If integration exists, fully execute it (art / language / play)
+- No advice, no instructions — only classroom execution text
 - Plain text only
 """
 
@@ -152,8 +140,48 @@ Requirements:
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4
         )
-        plan["ai_script"] = response.choices[0].message.content
+        return response.choices[0].message.content
     except Exception as e:
-        plan["ai_script"] = f"AI temporarily unavailable: {str(e)}"
+        return f"AI temporarily unavailable: {str(e)}"
 
-    return plan
+
+# ================= CHAPTER PLAN GENERATION =================
+def generate_chapter_plan(
+    df, grade, subject, chapter, total_days, pedagogy
+):
+    outcomes = df[
+        (df["grade"] == grade) &
+        (df["subject"] == subject) &
+        (df["chapter"] == chapter)
+    ]["learning_outcomes"].tolist()
+
+    integrations = assign_integrations(total_days)
+
+    chapter_plan = {
+        "grade": grade,
+        "subject": subject,
+        "chapter": chapter,
+        "pedagogy": pedagogy,
+        "total_days": total_days,
+        "days": []
+    }
+
+    for i in range(total_days):
+        day_no = i + 1
+        day_plan = {
+            "day_no": day_no,
+            "status": "unlocked" if i == 0 else "locked",
+            "integration": integrations[i],
+            "period_structure": PERIOD_STRUCTURE,
+            "learning_outcomes": outcomes,
+            "pedagogy_flow": pedagogy_flow(pedagogy),
+            "teaching_script": generate_ai_script(
+                grade, subject, chapter,
+                day_no, pedagogy, outcomes,
+                integrations[i]
+            )
+        }
+
+        chapter_plan["days"].append(day_plan)
+
+    return chapter_plan
