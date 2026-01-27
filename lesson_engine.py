@@ -1,18 +1,21 @@
 import pandas as pd
 import os
 import google.generativeai as genai
+from math import floor
 
 DATA_PATH = "data/master.tsv"
 
-# ================= AI CONFIG =================
-API_KEY = os.environ.get("AIzaSyC-EsDH1Xdiwc5qOiB4ba_T94aOhc1w-AA")
-MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
-
+# ================= AI CONFIG (AUTO-DETECT) =================
+API_KEY = os.environ.get("GEMINI_API_KEY")
 model = None
+
 if API_KEY:
     try:
         genai.configure(api_key=API_KEY)
-        model = genai.GenerativeModel(MODEL_NAME)
+        for m in genai.list_models():
+            if "generateContent" in m.supported_generation_methods:
+                model = genai.GenerativeModel(m.name)
+                break
     except:
         model = None
 
@@ -28,99 +31,81 @@ def load_data():
     return df
 
 
-# ================= ANNUAL PLAN =================
-def calculate_annual_plan(df, grade, subject):
+# ================= ANNUAL PLAN ENGINE =================
+def generate_annual_plan(df, grade, subject, total_days):
     filtered = df[(df["grade"] == grade) & (df["subject"] == subject)]
-    plan = {}
-    for ch in filtered["chapter"].unique():
-        lo_count = len(filtered[filtered["chapter"] == ch])
-        plan[ch] = max(3, lo_count)
-    return plan
 
+    chapter_weights = (
+        filtered.groupby("chapter")["learning_outcomes"]
+        .count()
+        .to_dict()
+    )
 
-# =====================================================
-# =============== PEDAGOGY ENGINES ====================
-# =====================================================
+    total_weight = sum(chapter_weights.values())
 
-def generate_learn360(outcomes, period_minutes):
-    return {
-        "Launch (Engage)": (
-            "Begin with an open-ended question connected to students’ life. "
-            "Allow free responses without correction to build confidence."
-        ),
-        "Explore": (
-            "Narrate a short story or situation related to the concept. "
-            "Ask students what they notice and what they think might happen next."
-        ),
-        "Anchor": (
-            "Clearly explain the core concept using simple language and examples. "
-            "Repeat key words aloud with students."
-        ),
-        "Relate": (
-            "Invite students to connect the idea to their own life or surroundings."
-        ),
-        "Nurture": (
-            "Guide a short activity (drawing, speaking, acting) to practice learning."
-        ),
-        "Apply & Reflect": (
-            "Ask reflective questions: What did you learn? Why is it important?"
-        )
+    # Initial allocation
+    allocation = {
+        ch: max(1, floor((w / total_weight) * total_days))
+        for ch, w in chapter_weights.items()
     }
 
+    # Adjust to fix rounding drift
+    current_total = sum(allocation.values())
+    diff = total_days - current_total
 
-def generate_blooms(outcomes, period_minutes):
-    return {
-        "Remember": (
-            "Recall facts or ideas using simple questions. Students answer orally."
-        ),
-        "Understand": (
-            "Explain the concept in their own words or through examples."
-        ),
-        "Apply": (
-            "Use the concept in a new situation or problem."
-        ),
-        "Analyze": (
-            "Compare, differentiate, or explain reasons."
-        ),
-        "Evaluate": (
-            "Express opinions or judgments with reasons."
-        ),
-        "Create": (
-            "Produce something new: a sentence, idea, role-play, or solution."
-        )
-    }
+    chapters = list(allocation.keys())
+    i = 0
+    while diff != 0:
+        allocation[chapters[i % len(chapters)]] += 1 if diff > 0 else -1
+        diff = total_days - sum(allocation.values())
+        i += 1
+
+    return allocation
 
 
-def generate_5e(outcomes, period_minutes):
-    return {
-        "Engage": (
-            "Capture interest through a question, story, or surprising fact."
-        ),
-        "Explore": (
-            "Students investigate through discussion or activity before explanation."
-        ),
-        "Explain": (
-            "Teacher clarifies the concept using student responses."
-        ),
-        "Elaborate": (
-            "Extend learning by applying it to new contexts."
-        ),
-        "Evaluate": (
-            "Check understanding through questions and observation."
-        )
-    }
+# ================= PEDAGOGY STRUCTURES =================
+def pedagogy_learn360():
+    return [
+        "Launch – connect with life and emotions",
+        "Explore – guided discovery through story or activity",
+        "Anchor – clear concept explanation",
+        "Relate – personal and real-life linkage",
+        "Nurture – practice and support",
+        "Apply & Reflect – consolidation"
+    ]
+
+
+def pedagogy_blooms():
+    return [
+        "Remember",
+        "Understand",
+        "Apply",
+        "Analyze",
+        "Evaluate",
+        "Create"
+    ]
+
+
+def pedagogy_5e():
+    return [
+        "Engage",
+        "Explore",
+        "Explain",
+        "Elaborate",
+        "Evaluate"
+    ]
 
 
 PEDAGOGY_MAP = {
-    "LEARN360": generate_learn360,
-    "BLOOMS": generate_blooms,
-    "5E": generate_5e
+    "LEARN360": pedagogy_learn360,
+    "BLOOMS": pedagogy_blooms,
+    "5E": pedagogy_5e
 }
 
 
-# ================= DAY-WISE PLAN =================
-def generate_daywise_plan(
-    df, grade, subject, chapter, days, period_minutes, pedagogy
+# ================= DAILY PLAN GENERATOR =================
+def generate_daily_plans(
+    df, grade, subject, chapter, days, pedagogy
 ):
     outcomes = df[
         (df["grade"] == grade) &
@@ -128,20 +113,21 @@ def generate_daywise_plan(
         (df["chapter"] == chapter)
     ]["learning_outcomes"].tolist()
 
+    structure = PEDAGOGY_MAP[pedagogy]()
     plans = []
-    pedagogy_func = PEDAGOGY_MAP[pedagogy]
 
     for day in range(1, days + 1):
         plans.append({
             "day": f"Day {day}",
             "pedagogy": pedagogy,
+            "structure": structure,
             "learning_outcomes": outcomes,
-            "lesson_flow": pedagogy_func(outcomes, period_minutes),
-            "assessment": (
-                "Observation, oral responses, participation, ability to relate concept."
+            "teacher_guidance": (
+                f"This day focuses on progressing learners through "
+                f"the {pedagogy} framework while reinforcing core ideas."
             ),
-            "sel": (
-                "Confidence building, listening to peers, expressing ideas."
+            "assessment": (
+                "Observation, questioning, participation, concept clarity."
             )
         })
 
@@ -149,35 +135,37 @@ def generate_daywise_plan(
 
 
 # ================= AI ENRICHMENT =================
-def enrich_lesson_content(day_plan, grade, subject, chapter):
+def enrich_with_ai(plan, grade, subject, chapter):
     if not model:
-        day_plan["ai_detail"] = "AI enrichment disabled."
-        return day_plan
+        plan["ai_script"] = "AI not available. Pedagogical structure remains valid."
+        return plan
 
     prompt = f"""
-You are an expert Indian teacher.
+Create a FULL teacher script.
 
-Create a FULL, DETAILED teaching SCRIPT for:
 Class: {grade}
 Subject: {subject}
 Chapter: {chapter}
-Pedagogy: {day_plan['pedagogy']}
+Pedagogy: {plan['pedagogy']}
+Day: {plan['day']}
 
 Learning Outcomes:
-{day_plan['learning_outcomes']}
+{plan['learning_outcomes']}
+
+Pedagogy Structure:
+{plan['structure']}
 
 Requirements:
-- Minute-wise teacher guidance
-- Exact questions to ask
+- Minute-wise teacher narration
+- Exact questions
 - Expected student responses
-- Full stories / rhymes where suitable
-- SEL moments
+- Full stories or examples
 - Plain text only
 """
 
     try:
-        day_plan["ai_detail"] = model.generate_content(prompt).text
+        plan["ai_script"] = model.generate_content(prompt).text
     except Exception as e:
-        day_plan["ai_detail"] = f"AI unavailable: {str(e)}"
+        plan["ai_script"] = f"AI unavailable: {str(e)}"
 
-    return day_plan
+    return plan
