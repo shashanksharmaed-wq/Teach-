@@ -5,7 +5,7 @@ import google.generativeai as genai
 DATA_PATH = "data/master.tsv"
 
 # ================= AI CONFIG =================
-API_KEY = os.environ.get("GEMINI_API_KEY")
+API_KEY = os.environ.get("AIzaSyC-EsDH1Xdiwc5qOiB4ba_T94aOhc1w-AA")
 MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
 
 model = None
