@@ -2,14 +2,14 @@ import streamlit as st
 import os, json
 from lesson_engine import (
     load_data,
-    calculate_annual_plan,
-    generate_daywise_plan,
-    enrich_lesson_content
+    generate_annual_plan,
+    generate_daily_plans,
+    enrich_with_ai
 )
 from approvals import submit_for_approval, approve_lesson, is_locked
 
 st.set_page_config(page_title="ERPACAD", layout="wide")
-st.title("ERPACAD – Advanced Academic Engine")
+st.title("ERPACAD – Academic Orchestration Engine")
 
 df = load_data()
 APPROVAL_DIR = "approvals"
@@ -21,40 +21,53 @@ if role == "Teacher":
     st.subheader("👩‍🏫 Teacher Panel")
 
     grade = st.selectbox("Class", sorted(df["grade"].unique()))
-    subject = st.selectbox("Subject", sorted(df[df["grade"] == grade]["subject"].unique()))
-    annual_plan = calculate_annual_plan(df, grade, subject)
+    subject = st.selectbox(
+        "Subject", sorted(df[df["grade"] == grade]["subject"].unique())
+    )
 
-    chapter = st.selectbox("Chapter", list(annual_plan.keys()))
+    total_days = st.slider(
+        "Total Working Days in Academic Year",
+        min_value=160,
+        max_value=210,
+        value=210
+    )
+
     pedagogy = st.selectbox(
         "Pedagogy Framework",
         ["LEARN360", "BLOOMS", "5E"]
     )
 
+    annual_plan = generate_annual_plan(df, grade, subject, total_days)
+
+    st.markdown("## 📅 Annual Academic Plan")
+    st.table(
+        [{"Chapter": k, "Days": v} for k, v in annual_plan.items()]
+    )
+
+    chapter = st.selectbox("Select Chapter", list(annual_plan.keys()))
+    days = annual_plan[chapter]
+
     meta = {
         "grade": grade,
         "subject": subject,
         "chapter": chapter,
-        "pedagogy": pedagogy
+        "pedagogy": pedagogy,
+        "days": days
     }
 
     if is_locked(meta):
-        st.error("🔒 Lesson plan is approved and locked.")
+        st.error("🔒 Lesson plan already approved and locked.")
         st.stop()
 
-    days = st.number_input("Number of Days", min_value=1, value=annual_plan[chapter])
-    period_minutes = st.selectbox("Period Duration", [30, 35, 40, 45])
     use_ai = st.checkbox("Generate detailed teaching script (AI)")
 
-    if st.button("Generate Lesson Plan"):
-        plans = generate_daywise_plan(
-            df, grade, subject, chapter, days, period_minutes, pedagogy
+    if st.button("Generate Daily Lesson Plans"):
+        plans = generate_daily_plans(
+            df, grade, subject, chapter, days, pedagogy
         )
 
         if use_ai:
-            plans = [
-                enrich_lesson_content(p, grade, subject, chapter)
-                for p in plans
-            ]
+            plans = [enrich_with_ai(p, grade, subject, chapter) for p in plans]
 
         st.session_state["plans"] = plans
         st.session_state["meta"] = meta
@@ -62,23 +75,12 @@ if role == "Teacher":
     if "plans" in st.session_state:
         for p in st.session_state["plans"]:
             st.markdown(f"## {p['day']} ({p['pedagogy']})")
-
-            for phase, text in p["lesson_flow"].items():
-                st.markdown(f"### {phase}")
-                st.write(text)
-
-            st.markdown("### Learning Outcomes")
-            st.write(p["learning_outcomes"])
-
-            st.markdown("### Assessment")
-            st.write(p["assessment"])
-
-            st.markdown("### SEL Focus")
-            st.write(p["sel"])
-
+            st.write("Learning Outcomes:", p["learning_outcomes"])
+            st.write("Pedagogical Flow:", p["structure"])
+            st.write("Assessment:", p["assessment"])
             if use_ai:
                 st.markdown("### Detailed Teaching Script")
-                st.write(p["ai_detail"])
+                st.write(p["ai_script"])
 
         if st.button("📤 Submit to Principal"):
             submit_for_approval(st.session_state["meta"], st.session_state["plans"])
