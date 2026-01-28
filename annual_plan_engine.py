@@ -1,197 +1,98 @@
-"""
-ERPACAD – Annual Academic Planning Engine
-PERIOD-BASED | CBSE-ALIGNED | STABLE
+# annual_plan_engine.py
 
-Design principles:
-- Principal sets ONLY total working days per class
-- Planning is done in PERIODS (not days)
-- CBSE blocks (revision, exams, assessment, remediation) are mandatory
-- Chapters cannot be rushed
-- Output is structured (UI decides what to display)
-"""
-
-# =====================================================
-# CONFIGURATION (CBSE REALITY)
-# =====================================================
-
-PERIODS_PER_DAY = 8
-
-CBSE_BLOCKS = {
-    "teaching": 0.65,
-    "revision": 0.10,
-    "assessment": 0.10,
-    "exams": 0.10,
-    "buffer": 0.05
-}
-
-# Weekly subject frequency (typical CBSE timetable)
-WEEKLY_PERIODS = {
-    "science": 5,
-    "mathematics": 5,
-    "english": 5,
-    "social science": 4,
-    "hindi": 4,
-    "language": 4,
-    "computer": 2,
-    "gk": 2,
-    "evs": 5
-}
-
-# Base minimum teaching load per chapter
-BASE_CHAPTER_PERIODS = {
-    "primary": 6,     # Class 1–5
-    "middle": 10,     # Class 6–8
-    "secondary": 14  # Class 9–10
-}
-
-# Mandatory integrations (play, art/subject, language)
-INTEGRATION_PERIODS = 3
-
-
-# =====================================================
-# HELPERS (TYPE SAFE)
-# =====================================================
-
-def normalize_grade(grade):
-    try:
-        return int(grade)
-    except Exception:
-        raise ValueError(f"Invalid grade value: {grade}")
-
-
-def get_class_band(grade):
-    grade = normalize_grade(grade)
-    if grade <= 5:
-        return "primary"
-    elif grade <= 8:
-        return "middle"
-    return "secondary"
-
-
-def get_weekly_periods(subject):
-    subject_lower = subject.lower()
-    for key, value in WEEKLY_PERIODS.items():
-        if key in subject_lower:
-            return value
-    return 4  # safe default
-
-
-def calculate_chapter_periods(grade, lo_count):
+def get_weekly_periods(subject: str) -> int:
     """
-    Calculates minimum teaching periods required for a chapter.
-    Ensures no unrealistic compression.
+    CBSE-aligned weekly periods per subject
+    Defensive against None / invalid input
     """
-    band = get_class_band(grade)
-    base = BASE_CHAPTER_PERIODS[band]
+    if not subject or not isinstance(subject, str):
+        return 5  # safe CBSE default
 
-    # LO influence (soft, capped)
-    lo_factor = min(max(lo_count, 1), 5)
+    s = subject.lower()
 
-    periods = base + lo_factor + INTEGRATION_PERIODS
+    mapping = {
+        "math": 6,
+        "mathematics": 6,
+        "science": 6,
+        "physics": 6,
+        "chemistry": 6,
+        "biology": 6,
+        "english": 7,
+        "language": 7,
+        "evs": 5,
+        "social": 5,
+        "history": 4,
+        "geography": 4,
+        "civics": 3,
+        "economics": 3,
+        "computer": 3,
+    }
 
-    # Absolute academic safety
-    if band == "middle":
-        periods = max(periods, 10)
-    elif band == "secondary":
-        periods = max(periods, 14)
+    for key, val in mapping.items():
+        if key in s:
+            return val
 
-    return periods
+    return 5
 
 
-# =====================================================
-# MAIN ENGINE
-# =====================================================
-
-def generate_annual_plan(df, grade, subject, total_working_days):
+def generate_annual_plan(df, grade, subject, academic_days):
     """
-    Generates an annual academic plan for ONE class + ONE subject.
-
-    Returns a STRUCTURED DICT.
-    UI must display only `plan["chapters"]` as table.
+    Period-based annual planning
+    CBSE-safe, no rushing chapters
     """
 
-    # -----------------------------
-    # Normalize inputs
-    # -----------------------------
-    grade = normalize_grade(grade)
-    total_working_days = int(total_working_days)
+    if subject is None:
+        return {"chapters": []}
 
-    # -----------------------------
-    # Total periods
-    # -----------------------------
-    total_periods = total_working_days * PERIODS_PER_DAY
-    teaching_periods = int(total_periods * CBSE_BLOCKS["teaching"])
-
-    # -----------------------------
-    # Weekly subject frequency
-    # -----------------------------
     weekly_periods = get_weekly_periods(subject)
+    total_weeks = academic_days // 5
+    total_periods = total_weeks * weekly_periods
 
-    # -----------------------------
-    # Filter subject data
-    # -----------------------------
+    # Reserve CBSE mandatory blocks
+    cbse_reserved = {
+        "revision": int(total_periods * 0.15),
+        "assessment": int(total_periods * 0.10),
+        "exams": int(total_periods * 0.10),
+        "remediation": int(total_periods * 0.05),
+    }
+
+    usable_periods = total_periods - sum(cbse_reserved.values())
+
     subject_df = df[
         (df["grade"] == grade) &
         (df["subject"] == subject)
     ]
 
+    if subject_df.empty:
+        return {"chapters": []}
+
     chapters = []
-    total_required_periods = 0
+    chapter_groups = subject_df.groupby("chapter")
 
-    for chapter, group in subject_df.groupby("chapter"):
-        lo_count = group["learning_outcome"].nunique()
+    total_los = chapter_groups["learning_outcome"].nunique().sum()
 
-        required_periods = calculate_chapter_periods(
-            grade=grade,
-            lo_count=lo_count
+    for chapter, grp in chapter_groups:
+        lo_count = grp["learning_outcome"].nunique()
+
+        # Weight by learning outcomes
+        required_periods = max(
+            2,
+            round((lo_count / total_los) * usable_periods)
         )
-
-        total_required_periods += required_periods
 
         chapters.append({
             "chapter": chapter,
-            "required_periods": required_periods
+            "learning_outcomes": lo_count,
+            "required_periods": required_periods,
+            "completed_periods": 0
         })
 
-    # -----------------------------
-    # Scale down if overflow
-    # -----------------------------
-    if total_required_periods > teaching_periods and total_required_periods > 0:
-        scale = teaching_periods / total_required_periods
-        min_floor = BASE_CHAPTER_PERIODS[get_class_band(grade)]
-
-        for ch in chapters:
-            ch["required_periods"] = max(
-                int(ch["required_periods"] * scale),
-                min_floor
-            )
-
-    # -----------------------------
-    # Final chapter metadata
-    # -----------------------------
-    for ch in chapters:
-        ch["approx_weeks"] = round(
-            ch["required_periods"] / weekly_periods,
-            1
-        )
-        ch["status"] = "Planned"
-
-    # -----------------------------
-    # Return structured plan
-    # -----------------------------
     return {
         "grade": grade,
         "subject": subject,
-        "total_working_days": total_working_days,
-        "periods_per_day": PERIODS_PER_DAY,
-        "total_periods": total_periods,
-        "teaching_periods": teaching_periods,
+        "academic_days": academic_days,
         "weekly_periods": weekly_periods,
-        "chapters": chapters,
-        "cbse_blocks": {
-            "revision_periods": int(total_periods * CBSE_BLOCKS["revision"]),
-            "assessment_periods": int(total_periods * CBSE_BLOCKS["assessment"]),
-            "exam_periods": int(total_periods * CBSE_BLOCKS["exams"]),
-            "buffer_periods": int(total_periods * CBSE_BLOCKS["buffer"])
-        }
+        "total_periods": total_periods,
+        "cbse_blocks": cbse_reserved,
+        "chapters": chapters
     }
