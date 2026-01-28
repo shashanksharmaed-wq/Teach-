@@ -42,14 +42,14 @@ if st.session_state.user is None:
         # Principal
         principal = st.secrets.get("principal", {})
         if uid == principal.get("id") and pwd == principal.get("password"):
-            st.session_state.user = "principal"
+            st.session_state.user = uid
             st.session_state.role = "principal"
             st.rerun()
 
-        # Teachers
+        # Teacher (ANY teacher)
         for t in st.secrets.get("teachers", {}).values():
             if uid == t.get("id") and pwd == t.get("password"):
-                st.session_state.user = t
+                st.session_state.user = uid
                 st.session_state.role = "teacher"
                 st.rerun()
 
@@ -61,19 +61,13 @@ if st.session_state.user is None:
 # SIDEBAR
 # =====================================================
 with st.sidebar:
-    user_label = (
-        "principal"
-        if st.session_state.role == "principal"
-        else st.session_state.user["id"]
-    )
-    st.write(f"👤 Logged in as **{user_label}**")
-
+    st.write(f"👤 Logged in as **{st.session_state.user}**")
     if st.button("🚪 Logout"):
         st.session_state.clear()
         st.rerun()
 
 # =====================================================
-# PRINCIPAL DASHBOARD (READ ONLY)
+# PRINCIPAL DASHBOARD (READ-ONLY)
 # =====================================================
 if st.session_state.role == "principal":
     st.title("📊 Principal Dashboard")
@@ -101,39 +95,18 @@ if st.session_state.role == "principal":
     st.stop()
 
 # =====================================================
-# TEACHER CONSOLE
+# TEACHER CONSOLE (OPEN ACCESS)
 # =====================================================
-teacher = st.session_state.user
-allowed_classes = list(map(int, teacher["classes"]))
-allowed_subjects = teacher["subjects"]
-
 st.title("📘 Teaching Console")
 
 # -----------------------------------------------------
-# CLASS SELECTION
+# CLASS & SUBJECT (NO RESTRICTION)
 # -----------------------------------------------------
-grade = st.selectbox("Class", sorted(allowed_classes))
-
-# -----------------------------------------------------
-# SUBJECT RESOLUTION (EVS ↔ SCIENCE FIX)
-# -----------------------------------------------------
-def resolve_allowed_subjects(grade, allowed_subjects):
-    resolved = set(allowed_subjects)
-
-    # CBSE reality: EVS is science-led for primary
-    if grade <= 5 and "Science" in allowed_subjects:
-        resolved.add("EVS")
-
-    return list(resolved)
-
-
-resolved_subjects = resolve_allowed_subjects(grade, allowed_subjects)
+grade = st.selectbox("Class", sorted(df["grade"].unique()))
 
 subjects = (
-    df[
-        (df["grade"] == grade) &
-        (df["subject"].isin(resolved_subjects))
-    ]["subject"]
+    df[df["grade"] == grade]["subject"]
+    .dropna()
     .unique()
     .tolist()
 )
@@ -145,7 +118,7 @@ if not subject:
     st.stop()
 
 # -----------------------------------------------------
-# ACADEMIC DAYS (USER SELECTABLE, CBSE SAFE)
+# ACADEMIC DAYS (USER SELECTABLE)
 # -----------------------------------------------------
 academic_days = st.number_input(
     "Academic Working Days (School-wide)",
@@ -155,13 +128,13 @@ academic_days = st.number_input(
 )
 
 # -----------------------------------------------------
-# ANNUAL PLAN (AUTO, PERIOD-BASED)
+# ANNUAL PLAN (AUTO, CBSE SAFE)
 # -----------------------------------------------------
 annual_plan = generate_annual_plan(df, grade, subject, academic_days)
 chapters = annual_plan.get("chapters", [])
 
 if not chapters:
-    st.warning("No chapters found for this selection.")
+    st.warning("No chapters found.")
     st.stop()
 
 chapter = st.selectbox("Chapter", [c["chapter"] for c in chapters])
