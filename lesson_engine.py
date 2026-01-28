@@ -1,187 +1,127 @@
 import pandas as pd
 import os
-from math import floor
 from openai import OpenAI
 
-DATA_PATH = "data/master.tsv"
+DATA_PATH = "data/Teachshank_Master_Database_FINAL.tsv"
 
-# ================= OPENAI CONFIG =================
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-
-
-# ================= LOAD DATA =================
+# ---------------- LOAD DATA ----------------
 def load_data():
     df = pd.read_csv(DATA_PATH, sep="\t")
     df.columns = [c.strip().lower() for c in df.columns]
     df.rename(columns={
+        "grade": "grade",
+        "subject": "subject",
         "chapter name": "chapter",
-        "learning outcomes": "learning_outcomes"
+        "learning outcomes": "learning_outcome"
     }, inplace=True)
     return df
 
-
-# ================= PERIOD STRUCTURE (CBSE) =================
+# ---------------- PERIOD STRUCTURE ----------------
 PERIOD_STRUCTURE = [
     ("Engage", 5),
-    ("Concept Build", 12),
-    ("Guided Interaction", 10),
-    ("Integration Slot", 12),
-    ("Closure & Assessment", 6)
+    ("Concept Build", 15),
+    ("Guided Practice", 10),
+    ("Integration / Activity", 10),
+    ("Closure & Assessment", 5)
 ]
 
-
-# ================= INTEGRATION ASSIGNMENT =================
+# ---------------- INTEGRATION LOGIC ----------------
 def assign_integrations(total_days):
-    """
-    Returns a list of integrations per day index (0-based).
-    Rules:
-    - Every chapter must have ART, SUBJECT_LANGUAGE, PLAY at least once
-    - Not forced daily
-    """
     integrations = [None] * total_days
-
-    if total_days == 1:
-        integrations[0] = "SUBJECT_LANGUAGE"
-
-    elif total_days == 2:
-        integrations[1] = "PLAY"
-
-    elif total_days == 3:
-        integrations[1] = "ART"
-        integrations[2] = "PLAY"
-
-    else:
-        integrations[1] = "SUBJECT_LANGUAGE"
-        integrations[2] = "ART"
-        integrations[-1] = "PLAY"
-
+    if total_days >= 1:
+        integrations[0] = "Language Integration"
+    if total_days >= 2:
+        integrations[1] = "Art Integration"
+    if total_days >= 3:
+        integrations[-1] = "Play-Based Activity"
     return integrations
 
+# ---------------- AI CLIENT ----------------
+def get_ai_client():
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        return None
+    return OpenAI(api_key=key)
 
-# ================= PEDAGOGY FLOW =================
-def pedagogy_flow(pedagogy):
-    if pedagogy == "LEARN360":
-        return [
-            "Launch",
-            "Explore",
-            "Anchor",
-            "Relate",
-            "Nurture",
-            "Apply & Reflect"
-        ]
-    if pedagogy == "BLOOMS":
-        return [
-            "Remember",
-            "Understand",
-            "Apply",
-            "Analyze",
-            "Evaluate",
-            "Create"
-        ]
-    if pedagogy == "5E":
-        return [
-            "Engage",
-            "Explore",
-            "Explain",
-            "Elaborate",
-            "Evaluate"
-        ]
-    return []
-
-
-# ================= AI SCRIPT GENERATION =================
-def generate_ai_script(
+# ---------------- TEACHING SCRIPT ----------------
+def generate_teaching_script(
     grade, subject, chapter, day_no,
-    pedagogy, learning_outcomes, integration
+    pedagogy, learning_outcomes, integration, language
 ):
+    client = get_ai_client()
     if not client:
-        return (
-            "Detailed teaching script can be generated when AI is available.\n"
-            "Use the structure above for classroom execution."
-        )
+        return "AI unavailable. Follow the structured lesson table and outcomes."
 
     prompt = f"""
-You are a senior Indian CBSE school teacher.
+You are an expert CBSE teacher.
 
-Create a VERY DETAILED, execution-level teaching script for ONE PERIOD.
+Create a VERY DETAILED, minute-wise teaching script.
 
 Class: {grade}
 Subject: {subject}
 Chapter: {chapter}
 Day: {day_no}
 Pedagogy: {pedagogy}
+Language: {language}
 
 Learning Outcomes:
 {learning_outcomes}
 
-Period Structure (40–45 min):
+Period Structure:
 {PERIOD_STRUCTURE}
 
-Pedagogy Flow:
-{pedagogy_flow(pedagogy)}
-
-Integration for this day:
+Integration Today:
 {integration}
 
-STRICT REQUIREMENTS:
-- Minute-wise teacher narration (what teacher says)
-- Exact questions teacher asks
+Rules:
+- Exact teacher dialogue
+- Questions to ask
 - Expected student responses
-- Likely misconceptions & correction
-- If integration exists, fully execute it (art / language / play)
-- No advice, no instructions — only classroom execution text
+- Misconceptions & correction
+- No advice, only classroom execution
 - Plain text only
 """
 
     try:
-        response = client.chat.completions.create(
+        res = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4
         )
-        return response.choices[0].message.content
+        return res.choices[0].message.content
     except Exception as e:
-        return f"AI temporarily unavailable: {str(e)}"
+        return f"AI error: {e}"
 
-
-# ================= CHAPTER PLAN GENERATION =================
-def generate_chapter_plan(
-    df, grade, subject, chapter, total_days, pedagogy
-):
-    outcomes = df[
+# ---------------- CHAPTER PLAN ----------------
+def generate_chapter_plan(df, grade, subject, chapter, total_days, pedagogy, language):
+    lo_list = df[
         (df["grade"] == grade) &
         (df["subject"] == subject) &
         (df["chapter"] == chapter)
-    ]["learning_outcomes"].tolist()
+    ]["learning_outcome"].dropna().tolist()
 
     integrations = assign_integrations(total_days)
 
-    chapter_plan = {
+    plan = {
         "grade": grade,
         "subject": subject,
         "chapter": chapter,
-        "pedagogy": pedagogy,
         "total_days": total_days,
+        "pedagogy": pedagogy,
         "days": []
     }
 
     for i in range(total_days):
-        day_no = i + 1
-        day_plan = {
-            "day_no": day_no,
+        plan["days"].append({
+            "day_no": i + 1,
             "status": "unlocked" if i == 0 else "locked",
             "integration": integrations[i],
+            "learning_outcomes": lo_list,
             "period_structure": PERIOD_STRUCTURE,
-            "learning_outcomes": outcomes,
-            "pedagogy_flow": pedagogy_flow(pedagogy),
-            "teaching_script": generate_ai_script(
-                grade, subject, chapter,
-                day_no, pedagogy, outcomes,
-                integrations[i]
+            "script": generate_teaching_script(
+                grade, subject, chapter, i + 1,
+                pedagogy, lo_list, integrations[i], language
             )
-        }
+        })
 
-        chapter_plan["days"].append(day_plan)
-
-    return chapter_plan
+    return plan
