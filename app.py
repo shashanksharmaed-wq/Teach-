@@ -5,30 +5,33 @@ from annual_plan_engine import generate_annual_plan
 from lesson_engine import generate_chapter_execution_plan
 from export_utils import generate_lesson_pdf, generate_lesson_word
 
-# --------------------------------------------------
+# =====================================================
 # PAGE CONFIG
-# --------------------------------------------------
+# =====================================================
 st.set_page_config(page_title="ERPACAD", layout="wide")
 
-# --------------------------------------------------
+# =====================================================
 # LOAD DATA
-# --------------------------------------------------
+# =====================================================
 DATA_PATH = "data/Teachshank_Master_Database_FINAL.tsv"
 
 df = pd.read_csv(DATA_PATH, sep="\t")
 df.columns = [c.strip().lower() for c in df.columns]
 df.rename(columns={"learning outcomes": "learning_outcome"}, inplace=True)
 
-# --------------------------------------------------
+# =====================================================
 # SESSION STATE
-# --------------------------------------------------
-for key in ["user", "role", "progress"]:
-    if key not in st.session_state:
-        st.session_state[key] = None if key != "progress" else {}
+# =====================================================
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "role" not in st.session_state:
+    st.session_state.role = None
+if "progress" not in st.session_state:
+    st.session_state.progress = {}
 
-# --------------------------------------------------
-# LOGIN
-# --------------------------------------------------
+# =====================================================
+# LOGIN (ID + PASSWORD)
+# =====================================================
 if st.session_state.user is None:
     st.title("🔐 ERPACAD Login")
 
@@ -37,172 +40,232 @@ if st.session_state.user is None:
 
     if st.button("Login"):
         # Principal
-        p = st.secrets.get("principal", {})
-        if uid == p.get("id") and pwd == p.get("password"):
+        principal = st.secrets.get("principal", {})
+        if uid == principal.get("id") and pwd == principal.get("password"):
             st.session_state.user = "principal"
             st.session_state.role = "principal"
             st.rerun()
 
         # Teachers
         for t in st.secrets.get("teachers", {}).values():
-            if uid == t["id"] and pwd == t["password"]:
+            if uid == t.get("id") and pwd == t.get("password"):
                 st.session_state.user = t
                 st.session_state.role = "teacher"
                 st.rerun()
 
-        st.error("Invalid credentials")
+        st.error("Invalid ID or Password")
 
     st.stop()
 
-# --------------------------------------------------
+# =====================================================
 # SIDEBAR
-# --------------------------------------------------
+# =====================================================
 with st.sidebar:
-    st.write(f"👤 Logged in as **{st.session_state.user if isinstance(st.session_state.user,str) else st.session_state.user['id']}**")
-    if st.button("Logout"):
+    user_label = (
+        "principal"
+        if st.session_state.role == "principal"
+        else st.session_state.user["id"]
+    )
+    st.write(f"👤 Logged in as **{user_label}**")
+
+    if st.button("🚪 Logout"):
         st.session_state.clear()
         st.rerun()
 
-# --------------------------------------------------
-# PRINCIPAL DASHBOARD
-# --------------------------------------------------
+# =====================================================
+# PRINCIPAL DASHBOARD (READ ONLY)
+# =====================================================
 if st.session_state.role == "principal":
     st.title("📊 Principal Dashboard")
 
     if not st.session_state.progress:
-        st.info("No teaching data yet.")
+        st.info("No teaching activity recorded yet.")
         st.stop()
 
     rows = []
-    for g in st.session_state.progress:
-        for s in st.session_state.progress[g]:
-            for c, v in st.session_state.progress[g][s].items():
+    for cls in st.session_state.progress:
+        for subj in st.session_state.progress[cls]:
+            for chap, data in st.session_state.progress[cls][subj].items():
                 rows.append({
-                    "Class": g,
-                    "Subject": s,
-                    "Chapter": c,
-                    "Completed": v["completed"],
-                    "Required": v["required"],
-                    "Progress %": round(v["completed"] / v["required"] * 100, 1)
+                    "Class": cls,
+                    "Subject": subj,
+                    "Chapter": chap,
+                    "Completed Periods": data["completed"],
+                    "Planned Periods": data["required"],
+                    "Completion %": round(
+                        (data["completed"] / data["required"]) * 100, 1
+                    )
                 })
 
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
     st.stop()
 
-# --------------------------------------------------
+# =====================================================
 # TEACHER CONSOLE
-# --------------------------------------------------
+# =====================================================
 teacher = st.session_state.user
 allowed_classes = list(map(int, teacher["classes"]))
 allowed_subjects = teacher["subjects"]
 
 st.title("📘 Teaching Console")
 
+# -----------------------------------------------------
+# CLASS SELECTION
+# -----------------------------------------------------
 grade = st.selectbox("Class", sorted(allowed_classes))
 
-subjects = df[
-    (df["grade"] == grade) &
-    (df["subject"].isin(allowed_subjects))
-]["subject"].unique().tolist()
+# -----------------------------------------------------
+# SUBJECT RESOLUTION (EVS ↔ SCIENCE FIX)
+# -----------------------------------------------------
+def resolve_allowed_subjects(grade, allowed_subjects):
+    resolved = set(allowed_subjects)
+
+    # CBSE reality: EVS is science-led for primary
+    if grade <= 5 and "Science" in allowed_subjects:
+        resolved.add("EVS")
+
+    return list(resolved)
+
+
+resolved_subjects = resolve_allowed_subjects(grade, allowed_subjects)
+
+subjects = (
+    df[
+        (df["grade"] == grade) &
+        (df["subject"].isin(resolved_subjects))
+    ]["subject"]
+    .unique()
+    .tolist()
+)
 
 subject = st.selectbox("Subject", subjects)
 
 if not subject:
-    st.warning("Please select subject")
+    st.warning("Please select a subject.")
     st.stop()
 
+# -----------------------------------------------------
+# ACADEMIC DAYS (USER SELECTABLE, CBSE SAFE)
+# -----------------------------------------------------
 academic_days = st.number_input(
-    "Academic Working Days",
+    "Academic Working Days (School-wide)",
     min_value=160,
     max_value=210,
     value=180
 )
 
+# -----------------------------------------------------
+# ANNUAL PLAN (AUTO, PERIOD-BASED)
+# -----------------------------------------------------
 annual_plan = generate_annual_plan(df, grade, subject, academic_days)
-chapters = annual_plan["chapters"]
+chapters = annual_plan.get("chapters", [])
 
 if not chapters:
-    st.warning("No chapters found")
+    st.warning("No chapters found for this selection.")
     st.stop()
 
 chapter = st.selectbox("Chapter", [c["chapter"] for c in chapters])
-meta = next(c for c in chapters if c["chapter"] == chapter)
+chapter_meta = next(c for c in chapters if c["chapter"] == chapter)
 
-# --------------------------------------------------
+# -----------------------------------------------------
 # LEARNING OUTCOMES
-# --------------------------------------------------
-los = df[
-    (df["grade"] == grade) &
-    (df["subject"] == subject) &
-    (df["chapter"] == chapter)
-]["learning_outcome"].unique().tolist()
+# -----------------------------------------------------
+learning_outcomes = (
+    df[
+        (df["grade"] == grade) &
+        (df["subject"] == subject) &
+        (df["chapter"] == chapter)
+    ]["learning_outcome"]
+    .unique()
+    .tolist()
+)
 
-key = f"{grade}-{subject}-{chapter}"
+# -----------------------------------------------------
+# EXECUTION PLAN (ONE PERIOD AT A TIME)
+# -----------------------------------------------------
+plan_key = f"{grade}-{subject}-{chapter}"
 
-if key not in st.session_state:
-    st.session_state[key] = generate_chapter_execution_plan(
+if plan_key not in st.session_state:
+    st.session_state[plan_key] = generate_chapter_execution_plan(
         grade=grade,
         subject=subject,
         chapter=chapter,
-        total_periods=meta["required_periods"],
+        total_periods=chapter_meta["required_periods"],
         pedagogy="LEARN360",
-        learning_outcomes=los,
+        learning_outcomes=learning_outcomes,
         language="English"
     )
 
-plan = st.session_state[key]
+plan = st.session_state[plan_key]
 
-current = next((p for p in plan["periods"] if p["status"] == "unlocked"), None)
+current_period = next(
+    (p for p in plan["periods"] if p["status"] == "unlocked"),
+    None
+)
 
-if not current:
-    st.success("🎉 Chapter Completed")
+if not current_period:
+    st.success("🎉 Chapter completed.")
     st.stop()
 
-# --------------------------------------------------
+# -----------------------------------------------------
 # DISPLAY PERIOD
-# --------------------------------------------------
-st.subheader(f"{chapter} – Period {current['period_no']} / {plan['required_periods']}")
-st.text_area("Teaching Script", current["script"], height=350)
+# -----------------------------------------------------
+st.subheader(
+    f"{chapter} — Period {current_period['period_no']} "
+    f"of {plan['required_periods']}"
+)
 
-# --------------------------------------------------
-# DOWNLOAD
-# --------------------------------------------------
-export_data = {
+st.markdown("### 🗣️ Detailed Teaching Script")
+st.text_area(
+    "Teaching Script",
+    current_period["script"],
+    height=350
+)
+
+# -----------------------------------------------------
+# DOWNLOADS
+# -----------------------------------------------------
+export_payload = {
     "grade": grade,
     "subject": subject,
     "chapter": chapter,
-    "period": current["period_no"],
-    "total": plan["required_periods"],
-    "script": current["script"],
-    "learning_outcomes": los,
+    "period_no": current_period["period_no"],
+    "total_periods": plan["required_periods"],
+    "learning_outcomes": learning_outcomes,
+    "script": current_period["script"],
 }
 
 c1, c2 = st.columns(2)
+
 with c1:
     if st.button("📄 Download PDF"):
-        path = generate_lesson_pdf(export_data)
+        path = generate_lesson_pdf(export_payload)
         with open(path, "rb") as f:
-            st.download_button("Download PDF", f, file_name="lesson.pdf")
+            st.download_button("Download PDF", f, file_name="Lesson_Plan.pdf")
 
 with c2:
     if st.button("📝 Download Word"):
-        path = generate_lesson_word(export_data)
+        path = generate_lesson_word(export_payload)
         with open(path, "rb") as f:
-            st.download_button("Download Word", f, file_name="lesson.docx")
+            st.download_button("Download Word", f, file_name="Lesson_Plan.docx")
 
-# --------------------------------------------------
-# MARK COMPLETE
-# --------------------------------------------------
+# -----------------------------------------------------
+# MARK PERIOD COMPLETE + TRACK PROGRESS
+# -----------------------------------------------------
 if st.button("✅ Mark Period Completed"):
-    idx = current["period_no"] - 1
+    idx = current_period["period_no"] - 1
     plan["periods"][idx]["status"] = "completed"
 
     if idx + 1 < len(plan["periods"]):
         plan["periods"][idx + 1]["status"] = "unlocked"
 
-    st.session_state.progress.setdefault(str(grade), {}) \
+    st.session_state.progress \
+        .setdefault(str(grade), {}) \
         .setdefault(subject, {}) \
-        .setdefault(chapter, {"completed": 0, "required": plan["required_periods"]})
+        .setdefault(
+            chapter,
+            {"completed": 0, "required": plan["required_periods"]}
+        )
 
     st.session_state.progress[str(grade)][subject][chapter]["completed"] += 1
     st.rerun()
