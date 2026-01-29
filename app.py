@@ -31,28 +31,30 @@ with col1:
     )
 
 with col2:
-    subjects = (
+    subject_list = (
         df[df["grade"].astype(str) == grade]["subject"]
         .dropna()
         .unique()
+        .tolist()
     )
-    subject = st.selectbox("Subject", sorted(subjects))
+    subject = st.selectbox("Subject", sorted(subject_list))
 
 with col3:
-    chapters = (
+    chapter_list = (
         df[
             (df["grade"].astype(str) == grade) &
             (df["subject"] == subject)
         ]["chapter name"]
         .dropna()
         .unique()
+        .tolist()
     )
 
-    if len(chapters) == 0:
-        st.warning("No chapters found for this class & subject")
-        chapter = None
+    if chapter_list:
+        chapter = st.selectbox("Chapter", sorted(chapter_list))
     else:
-        chapter = st.selectbox("Chapter", sorted(chapters))
+        chapter = None
+        st.warning("No chapters found for this selection.")
 
 st.divider()
 
@@ -75,26 +77,30 @@ with day_col2:
         value=1
     )
 
+st.divider()
+
 # ---------------- GENERATE PLAN ----------------
 if chapter and st.button("✨ Generate Detailed Daily Lesson Plan"):
 
-   learning_outcomes = df[
-    (df["grade"].astype(str) == grade) &
-    (df["subject"] == subject) &
-    (df["chapter name"] == chapter)
-]["learning outcomes"].tolist()
+    learning_outcomes = (
+        df[
+            (df["grade"].astype(str) == grade) &
+            (df["subject"] == subject) &
+            (df["chapter name"] == chapter)
+        ]["learning outcomes"]
+        .dropna()
+        .tolist()
+    )
 
-plan = generate_daily_plan(
-    grade=grade,
-    subject=subject,
-    chapter=chapter,
-    learning_outcomes=learning_outcomes,
-    day=day,
-    total_days=total_days
-)
+    plan = generate_daily_plan(
+        grade=grade,
+        subject=subject,
+        chapter=chapter,
+        learning_outcomes=learning_outcomes,
+        day=day,
+        total_days=total_days
+    )
 
-
-    st.divider()
     st.subheader(f"🧠 {chapter} — Day {day} of {total_days}")
 
     # ---------------- META ----------------
@@ -103,13 +109,13 @@ plan = generate_daily_plan(
         f"""
         **Class:** {meta.get("grade")}  
         **Subject:** {meta.get("subject")}  
-        **Duration:** {meta.get("duration")}  
+        **Grade Band:** {meta.get("band")}  
         """
     )
 
     st.divider()
 
-    # ---------------- LESSON SCRIPT ----------------
+    # ---------------- LESSON FLOW ----------------
     st.header("📚 Detailed Teaching Script")
 
     for step in plan["flow"]:
