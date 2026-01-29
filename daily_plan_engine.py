@@ -1,185 +1,225 @@
-def grade_band(grade):
-    g = str(grade).upper().strip()
-    if g in ["NURSERY", "LKG", "UKG", "KG", "PREP"]:
-        return "FOUNDATIONAL"
+# daily_plan_engine.py
+# ERPACAD – DEPTH++ Daily Lesson Planning Engine
+# Author: ERPACAD Core Engine
+# Purpose: Generate PERFORMANCE-READY lesson scripts (not instructions)
+
+from typing import Dict, List
+
+
+# -------------------------------
+# DEPTH PROFILE (Grade-sensitive)
+# -------------------------------
+
+def get_depth_profile(grade: str) -> Dict:
+    """
+    Determines cognitive and instructional depth based on grade band.
+    Grade is treated as STRING to avoid Nursery / KG errors.
+    """
+
+    grade_upper = str(grade).upper()
+
+    if grade_upper in ["NURSERY", "LKG", "UKG"]:
+        return {
+            "question_style": "oral, concrete, gesture-based",
+            "language_level": "simple, repetitive",
+            "abstract_allowed": False
+        }
+
     try:
-        g = int(g)
+        g = int(grade)
         if g <= 3:
-            return "PRIMARY"
+            return {
+                "question_style": "guided oral + visual",
+                "language_level": "simple with examples",
+                "abstract_allowed": False
+            }
         elif g <= 5:
-            return "UPPER_PRIMARY"
-        elif g <= 8:
-            return "MIDDLE"
+            return {
+                "question_style": "why/how with examples",
+                "language_level": "structured sentences",
+                "abstract_allowed": True
+            }
         else:
-            return "SECONDARY"
-    except:
-        return "PRIMARY"
+            return {
+                "question_style": "analytical, inferential",
+                "language_level": "academic but accessible",
+                "abstract_allowed": True
+            }
+    except ValueError:
+        return {
+            "question_style": "guided",
+            "language_level": "simple",
+            "abstract_allowed": False
+        }
 
 
-def generate_daily_plan(grade, subject, chapter, learning_outcomes, day, total_days):
+# -------------------------------
+# CORE ENGINE
+# -------------------------------
 
-    band = grade_band(grade)
+def generate_daily_plan(
+    grade: str,
+    subject: str,
+    chapter: str,
+    day: int,
+    total_days: int
+) -> Dict:
+    """
+    Generates ONE FULL DAY lesson plan using DEPTH++ framework.
+    """
 
-    # ---------------- LANGUAGE & COGNITIVE TONE ----------------
-    if band == "FOUNDATIONAL":
-        tone = "simple, concrete, oral"
-    elif band == "PRIMARY":
-        tone = "guided, example-based"
-    elif band == "UPPER_PRIMARY":
-        tone = "structured explanation"
-    elif band == "MIDDLE":
-        tone = "analytical with reasoning"
-    else:
-        tone = "critical and exam-oriented"
-
-    # ---------------- DEPTH FLOW ----------------
-    flow = []
-
-    # 1. ANCHOR
-    flow.append({
-        "phase": "ANCHOR – REAL LIFE CONNECTION",
-        "minutes": 5,
-        "teacher_script": (
-            f"Teacher says: Today we begin '{chapter}'. "
-            f"Before opening the book, think about a situation in real life related to this topic. "
-            f"I will ask two students to share."
-        ),
-        "student_expected": (
-            "Students respond orally using personal experiences. "
-            "Some answers may be short or unrelated initially."
-        ),
-        "misconceptions": (
-            "Students may think the topic is imaginary or unrelated to life."
-        ),
-        "teacher_correction": (
-            "Teacher gently rephrases responses to show the real-life link."
-        ),
-        "board_work": "Topic title written clearly on board.",
-        "skills": "Listening, Speaking",
-        "purpose": "Emotional and contextual readiness"
-    })
-
-    # 2. EXPOSURE
-    flow.append({
-        "phase": "EXPOSURE – CONTENT IMMERSION",
-        "minutes": 10,
-        "teacher_script": (
-            f"Teacher reads/explains the core content of '{chapter}' slowly. "
-            f"Important sentences are paused and emphasized. "
-            f"Teacher maintains eye contact and voice modulation."
-        ),
-        "student_expected": (
-            "Students listen attentively, follow the text, and observe expressions."
-        ),
-        "misconceptions": (
-            "Students may focus only on events, not ideas."
-        ),
-        "teacher_correction": (
-            "Teacher asks: What does this tell us about people/situations?"
-        ),
-        "board_work": "Key sentence or idea underlined on board.",
-        "skills": "Listening, Reading",
-        "purpose": "Deep exposure to authentic content"
-    })
-
-    # 3. UNPACK LEARNING OUTCOMES
-    for lo in learning_outcomes[:2]:
-        flow.append({
-            "phase": "UNPACK – LEARNING OUTCOME",
-            "minutes": 8,
-            "teacher_script": (
-                f"Teacher explains the learning outcome: '{lo}'. "
-                f"Examples are given from the chapter and daily life."
-            ),
-            "student_expected": (
-                "Students answer guided questions and attempt to explain in their own words."
-            ),
-            "misconceptions": (
-                "Students may repeat teacher words without understanding."
-            ),
-            "teacher_correction": (
-                "Teacher asks follow-up WHY and HOW questions."
-            ),
-            "board_work": "Learning outcome written in simple words.",
-            "skills": "Speaking, Understanding",
-            "purpose": "Clarifying expected learning"
-        })
-
-    # 4. THINKING & REASONING
-    flow.append({
-        "phase": "THINK – REASON & JUDGE",
-        "minutes": 8,
-        "teacher_script": (
-            "Teacher asks reasoning questions: Why did this happen? "
-            "What could have been done differently?"
-        ),
-        "student_expected": (
-            "Students justify answers; some may give emotional responses."
-        ),
-        "misconceptions": (
-            "Students may answer without evidence."
-        ),
-        "teacher_correction": (
-            "Teacher insists on answers supported by text or logic."
-        ),
-        "board_work": "Two reasoning questions written.",
-        "skills": "Thinking, Speaking",
-        "purpose": "Higher-order thinking"
-    })
-
-    # 5. PRACTICE / ENGAGEMENT
-    flow.append({
-        "phase": "ENGAGE – APPLY & EXPRESS",
-        "minutes": 7,
-        "teacher_script": (
-            f"Teacher conducts an activity related to '{chapter}' "
-            f"(short discussion / role-play / creative response)."
-        ),
-        "student_expected": (
-            "Students participate actively and express understanding."
-        ),
-        "misconceptions": (
-            "Students may focus on performance rather than concept."
-        ),
-        "teacher_correction": (
-            "Teacher redirects focus back to learning idea."
-        ),
-        "board_work": "Activity instructions briefly noted.",
-        "skills": "Speaking, Writing",
-        "purpose": "Reinforcement through engagement"
-    })
-
-    # 6. CLOSURE
-    flow.append({
-        "phase": "CLOSE – CONSOLIDATE",
-        "minutes": 5,
-        "teacher_script": (
-            "Teacher summarizes key learning in clear sentences "
-            "and asks students to share one takeaway."
-        ),
-        "student_expected": (
-            "Students respond with one-line summaries."
-        ),
-        "misconceptions": (
-            "Students may recall facts but miss meaning."
-        ),
-        "teacher_correction": (
-            "Teacher rephrases student answers for clarity."
-        ),
-        "board_work": "Summary point written.",
-        "skills": "Listening, Speaking",
-        "purpose": "Fix learning and retention"
-    })
+    depth = get_depth_profile(grade)
 
     return {
-        "meta": {
+        "metadata": {
             "grade": grade,
             "subject": subject,
             "chapter": chapter,
             "day": day,
             "total_days": total_days,
-            "band": band,
-            "tone": tone
+            "period_duration_minutes": 40
         },
-        "flow": flow
+
+        "learning_focus": [
+            f"Build conceptual understanding from '{chapter}' (Day {day})",
+            "Surface misconceptions and replace with accurate reasoning"
+        ],
+
+        "phases": [
+
+            # ---------------- ATTUNE ----------------
+            {
+                "phase": "ATTUNE",
+                "duration_min": 5,
+                "teacher_says": (
+                    "Teacher pauses, looks at students, and sets the tone.\n"
+                    "Teacher says: 'Before we begin, let us think quietly for a moment.'"
+                ),
+                "student_response": (
+                    "Students settle, focus attention, and mentally prepare."
+                ),
+                "purpose": "Emotional and cognitive readiness",
+                "diagram_required": False
+            },
+
+            # ---------------- ANCHOR ----------------
+            {
+                "phase": "ANCHOR",
+                "duration_min": 6,
+                "teacher_says": (
+                    "Teacher connects the chapter to a familiar experience.\n"
+                    "Teacher narrates a short, concrete situation related to the chapter.\n"
+                    "Teacher asks one open-ended question and waits."
+                ),
+                "student_response": (
+                    "Students share prior ideas, including partially correct or incorrect beliefs."
+                ),
+                "common_misconception": (
+                    "Students may explain using everyday logic rather than subject reasoning."
+                ),
+                "teacher_correction": (
+                    "Teacher does not correct immediately.\n"
+                    "Teacher acknowledges responses and says: 'Let us explore this together.'"
+                ),
+                "purpose": "Activate prior knowledge",
+                "diagram_required": False
+            },
+
+            # ---------------- UNPACK ----------------
+            {
+                "phase": "UNPACK",
+                "duration_min": 10,
+                "teacher_says": (
+                    "Teacher breaks the concept into small ideas.\n"
+                    "Teacher explains each idea slowly, using clear language.\n"
+                    f"Teacher asks {depth['question_style']} questions after each idea."
+                ),
+                "student_response": (
+                    "Students respond orally, ask questions, and clarify meaning."
+                ),
+                "key_vocabulary": [
+                    "Important terms from the chapter are introduced explicitly",
+                    "Teacher uses each word in a sentence",
+                    "Students repeat and rephrase"
+                ],
+                "purpose": "Concept construction",
+                "diagram_required": True,
+                "diagram_instruction": (
+                    "Teacher draws a simple labeled diagram on the board.\n"
+                    "Teacher explains each label while drawing.\n"
+                    "Students observe and verbally explain what each part shows."
+                )
+            },
+
+            # ---------------- CONFRONT ----------------
+            {
+                "phase": "CONFRONT",
+                "duration_min": 6,
+                "teacher_says": (
+                    "Teacher presents a common incorrect idea related to the topic.\n"
+                    "Teacher asks: 'Does this always happen? Why or why not?'"
+                ),
+                "student_response": (
+                    "Students initially agree or disagree.\n"
+                    "Some students revise their thinking."
+                ),
+                "teacher_correction": (
+                    "Teacher uses evidence, example, or board explanation to resolve confusion."
+                ),
+                "purpose": "Misconception correction",
+                "diagram_required": True,
+                "diagram_instruction": (
+                    "Teacher modifies or adds to the existing diagram to show correct logic."
+                )
+            },
+
+            # ---------------- STRUCTURE ----------------
+            {
+                "phase": "STRUCTURE",
+                "duration_min": 6,
+                "teacher_says": (
+                    "Teacher organizes ideas into clear steps or points on the board.\n"
+                    "Teacher numbers or boxes the logic clearly."
+                ),
+                "student_response": (
+                    "Students copy selectively and ask clarifying questions."
+                ),
+                "purpose": "Mental organization of knowledge",
+                "diagram_required": False
+            },
+
+            # ---------------- TRANSFER ----------------
+            {
+                "phase": "TRANSFER",
+                "duration_min": 4,
+                "teacher_says": (
+                    "Teacher poses a new situation different from the textbook.\n"
+                    "Teacher asks students to apply today’s idea to this new context."
+                ),
+                "student_response": (
+                    "Students attempt reasoning, even if unsure."
+                ),
+                "purpose": "Application beyond textbook",
+                "diagram_required": False
+            },
+
+            # ---------------- EVIDENCE ----------------
+            {
+                "phase": "EVIDENCE",
+                "duration_min": 3,
+                "teacher_says": (
+                    "Teacher asks two precise questions that reveal understanding.\n"
+                    "Teacher listens for reasoning, not memorized answers."
+                ),
+                "student_response": (
+                    "Students explain ideas in their own words."
+                ),
+                "evidence_of_learning": [
+                    "Student explains concept without prompting",
+                    "Student refers correctly to diagram or example"
+                ],
+                "purpose": "Verify learning",
+                "diagram_required": False
+            }
+        ]
     }
