@@ -1,10 +1,7 @@
 import streamlit as st
-from lesson_engine import (
-    load_data,
-    get_classes,
-    get_subjects,
-    get_chapters
-)
+
+from data_loader import load_data
+from daily_plan_engine import generate_deep_daily_plan
 
 st.set_page_config(
     page_title="ERPACAD – Academic Planning Engine",
@@ -17,14 +14,17 @@ st.caption("CBSE-aligned • Deep lesson planning • Teacher-ready")
 # ---------------- LOAD DATA ----------------
 df = load_data()
 
-# ---------------- SELECTION BAR ----------------
+# ---------------- SELECTORS ----------------
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    grade = st.selectbox("Class", get_classes(df))
+    grade = st.selectbox("Class", sorted(df["grade"].unique()))
 
 with col2:
-    subject = st.selectbox("Subject", get_subjects(df, grade))
+    subject = st.selectbox(
+        "Subject",
+        sorted(df[df["grade"] == grade]["subject"].unique())
+    )
 
 with col3:
     academic_days = st.number_input(
@@ -34,54 +34,56 @@ with col3:
         value=180
     )
 
-st.divider()
+# ---------------- CHAPTER LIST ----------------
+chapter_df = df[
+    (df["grade"] == grade) &
+    (df["subject"] == subject)
+]
 
-# ---------------- CHAPTERS ----------------
 st.subheader("📚 Chapters Covered")
-chapters = get_chapters(df, grade, subject)
 
-if not chapters:
-    st.warning("No chapters found.")
-    st.stop()
+chapters = chapter_df["chapter name"].unique().tolist()
+st.write(chapters)
 
-selected_chapter = st.selectbox(
-    "Select Chapter to Plan",
-    chapters
+# ---------------- DAILY PLAN ----------------
+st.divider()
+st.subheader("🗓️ Generate Daily Lesson Plan")
+
+chapter = st.selectbox("Select Chapter", chapters)
+
+total_days = st.number_input(
+    "Total Days for this Chapter",
+    min_value=1,
+    max_value=10,
+    value=5
 )
 
-# ---------------- ANNUAL PLAN ----------------
-if st.button("📅 Generate Annual Plan"):
-    st.session_state["annual_plan"] = {
-        "chapter": selected_chapter,
-        "total_days": 5  # placeholder logic
-    }
+day = st.selectbox(
+    "Select Day",
+    list(range(1, total_days + 1))
+)
 
-if "annual_plan" in st.session_state:
-    st.success(
-        f"Annual plan generated for **{selected_chapter}** "
-        f"({st.session_state['annual_plan']['total_days']} days)"
+if st.button("Generate Daily Plan"):
+    los = chapter_df[
+        chapter_df["chapter name"] == chapter
+    ]["learning outcomes"].tolist()
+
+    plan = generate_deep_daily_plan(
+        grade=grade,
+        subject=subject,
+        chapter=chapter,
+        learning_outcomes=los,
+        day=day,
+        total_days=total_days
     )
 
-    # ---------------- DAILY PLAN ----------------
-    day = st.selectbox(
-        "Select Day",
-        list(range(1, st.session_state["annual_plan"]["total_days"] + 1))
-    )
+    st.subheader(f"📖 {chapter} — Day {day} of {total_days}")
 
-    if st.button("🧠 Generate Daily Lesson Plan"):
-        st.session_state["daily_plan"] = {
-            "chapter": selected_chapter,
-            "day": day
-        }
-
-# ---------------- DAILY PLAN DISPLAY ----------------
-if "daily_plan" in st.session_state:
-    st.divider()
-    st.header(
-        f"📖 {st.session_state['daily_plan']['chapter']} "
-        f"— Day {st.session_state['daily_plan']['day']}"
-    )
-
-    st.info(
-        "Deep minute-wise lesson plan generation will appear here next."
-    )
+    for block in plan["lesson_flow"]:
+        with st.expander(
+            f"{block['phase']} ({block['minutes']} min)",
+            expanded=True
+        ):
+            st.markdown(f"**Teacher says:** {block['teacher_says']}")
+            st.markdown(f"**Students do:** {block['students_do']}")
+            st.markdown(f"**Purpose:** {block['purpose']}")
