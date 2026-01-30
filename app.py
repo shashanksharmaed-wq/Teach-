@@ -4,8 +4,8 @@ from engine import generate_lesson
 
 st.set_page_config(page_title="ERPACAD", layout="wide")
 
-st.title("ERPACAD – Lesson Planner (Stable Mode)")
-st.caption("Clean reset • Guaranteed working • No depth yet")
+st.title("ERPACAD – Lesson Planner")
+st.caption("Single-act lesson • Stable • Teacher-focused")
 
 # ---------------- INPUTS ----------------
 
@@ -48,15 +48,16 @@ if st.button("Generate Lesson"):
         day=day
     )
 
-    st.subheader("Lesson Plan")
+    st.subheader("🧠 Teaching Flow")
 
-    for block in lesson["blocks"]:
-        with st.expander(block["title"], expanded=True):
-            st.markdown("**Teacher does:**")
-            st.write(block["teacher"])
+    st.markdown("### 👩‍🏫 Teacher Flow")
+    st.write(lesson["teacher_flow"])
 
-            st.markdown("**Students do:**")
-            st.write(block["students"])
+    st.markdown("### 🧒 Student Flow")
+    st.write(lesson["student_flow"])
 
-            st.markdown("**Purpose:**")
-            st.write(block["purpose"])
+    st.markdown("### 🧾 TLM / Board Work")
+    st.write(lesson["tlm"])
+
+    st.markdown("### ✅ Expected Learning Outcome")
+    st.write(lesson["outcome_check"])
